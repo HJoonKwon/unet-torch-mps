@@ -50,4 +50,5 @@ class Unet(nn.Module):
         self.model = nn.Sequential(*self.layers)
 
     def forward(self, x: torch.Tensor):
+        ## TODO:: implement skip connections and cropping 
         return self.model(x)

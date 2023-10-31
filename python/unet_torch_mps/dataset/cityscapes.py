@@ -68,4 +68,6 @@ class CityScapesDataset(Dataset):
             id_mask = min_indices == i
             mask[:, id_mask] = i
 
+        img = img.float() / 255
+        
         return img, mask[0, :, :].unsqueeze(0)

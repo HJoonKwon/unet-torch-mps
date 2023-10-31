@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from model.blocks import Conv1, Conv3, UpConv, MaxPool
+from unet_torch_mps.model.blocks import Conv1, Conv3, UpConv, MaxPool
 
 
 class Unet(nn.Module):

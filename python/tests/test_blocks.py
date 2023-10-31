@@ -1,5 +1,5 @@
 import torch
-from model.blocks import Conv1, Conv3, UpConv, MaxPool
+from unet_torch_mps.model.blocks import Conv1, Conv3, UpConv, MaxPool
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 

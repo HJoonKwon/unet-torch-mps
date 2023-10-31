@@ -1,5 +1,5 @@
 import torch
-from model.unet import Unet
+from unet_torch_mps.model.unet import Unet
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 

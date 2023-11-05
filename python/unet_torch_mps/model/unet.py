@@ -64,14 +64,15 @@ class Unet(nn.Module):
         hx, wx = x.shape[2:]
         y = cached.pop()
         hy, wy = y.shape[2:]
-        y_cropped = y[
-            :,
-            :,
-            (hy - hx) // 2 : (hy - hx) // 2 + hx,
-            (wy - wx) // 2 : (wy - wx) // 2 + wx,
-        ]
-        assert y_cropped.shape == x.shape
-        x = torch.concat([y_cropped, x], dim=1)
+        # y_cropped = y[
+        #     :,
+        #     :,
+        #     (hy - hx) // 2 : (hy - hx) // 2 + hx,
+        #     (wy - wx) // 2 : (wy - wx) // 2 + wx,
+        # ]
+        # assert y_cropped.shape == x.shape
+        assert y.shape == x.shape, f"{y.shape}, {x.shape}"
+        x = torch.concat([y, x], dim=1)
         return x
 
     def forward(self, x: torch.Tensor):

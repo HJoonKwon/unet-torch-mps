@@ -110,7 +110,7 @@ class CityScapesDataset(Dataset):
         return mask_with_id
 
     def __len__(self):
-        return len(self.img_paths)
+        return len(self.img_and_mask_paths)
 
     def __getitem__(self, idx):
         img_mask_path = self.img_and_mask_paths[idx]

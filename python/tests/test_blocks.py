@@ -15,7 +15,7 @@ def test_Conv3():
     input = torch.randn((1, 1024, 32, 32), device=device)
     model = Conv3(input.shape[1], 1024).to(device)
     output = model(input)
-    assert output.shape == (1, 1024, 30, 30)
+    assert output.shape == (1, 1024, 32, 32)
 
 
 def test_UpConv():

@@ -5,7 +5,7 @@ device = "mps" if torch.backends.mps.is_available() else "cpu"
 
 
 def test_Unet():
-    input = torch.randn((1, 1, 572, 572), device=device)
+    input = torch.randn((1, 1, 512, 512), device=device)
     model = Unet(1, 2).to(device)
     output = model(input)
-    assert output.shape == (1, 2, 388, 388)
+    assert output.shape == (1, 2, 512, 512)

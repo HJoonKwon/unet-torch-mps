@@ -4,7 +4,7 @@ import torch.nn as nn
 class Conv3(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):
         super().__init__() 
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, 1, 0)
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, 1, padding='same')
         self.act = nn.ReLU()
         self.layer = nn.Sequential(
             self.conv,
@@ -16,7 +16,7 @@ class Conv3(nn.Module):
 class Conv1(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):
         super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 1, 1, 0)
+        self.conv = nn.Conv2d(in_ch, out_ch, 1, 1)
     def forward(self, x: torch.Tensor):
         return self.conv(x)
 

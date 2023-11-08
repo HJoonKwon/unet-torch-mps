@@ -4,10 +4,12 @@ import torch.nn as nn
 class Conv3(nn.Module):
     def __init__(self, in_ch: int, out_ch: int):
         super().__init__() 
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, 1, padding='same')
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, 1, padding='same', bias=False)
+        self.batchnorm = nn.BatchNorm2d(out_ch)
         self.act = nn.ReLU()
         self.layer = nn.Sequential(
             self.conv,
+            self.batchnorm,
             self.act
         )
     def forward(self, x: torch.Tensor) -> torch.Tensor:

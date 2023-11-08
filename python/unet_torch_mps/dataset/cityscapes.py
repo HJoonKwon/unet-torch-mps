@@ -106,7 +106,7 @@ class CityScapesDataset(Dataset):
             axis=2
         )  # (H, W, 30)
         min_indices = np.argmin(distance, axis=2)  # (H, W)
-        mask_with_id = min_indices.astype(np.uint8)
+        mask_with_id = min_indices.astype(np.float32)
         return mask_with_id
 
     def __len__(self):
@@ -123,4 +123,4 @@ class CityScapesDataset(Dataset):
 
         transformed = self.normalize_and_to_tensor(image=img, mask=mask)
         img, mask = transformed["image"], transformed["mask"]
-        return img, mask[None]
+        return img, mask

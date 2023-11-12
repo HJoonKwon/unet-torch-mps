@@ -1,22 +1,26 @@
 import argparse
 import torch
-from unet_torch_mps.model.unet import Unet
-from unet_torch_mps.dataset.cityscapes import CityScapesDataset
 import torch.nn.functional as F
 from tqdm import tqdm
-
-device = "mps" if torch.backends.mps.is_available() else "cpu"
+from unet_torch_mps.model.unet import Unet
+from unet_torch_mps.dataset.cityscapes import CityScapesDataset
+from unet_torch_mps.metrics.iou import IoU
 
 
 def main(*args):
     args = args[0]
     num_classes = args.c
     epochs = args.e
-    lr = args.lr
+    lr = args.lrd
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+
     model = Unet(3, num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = (
         torch.nn.CrossEntropyLoss() if num_classes > 1 else torch.nn.BCEWithLogitsLoss()
+    )
+    metric_fn = IoU(num_classes=num_classes, task="multiclass", per_class=False).to(
+        device
     )
 
     train_dataset = CityScapesDataset(img_and_mask_dir=args.d, skip_img_mask_split=True)
@@ -30,15 +34,16 @@ def main(*args):
             enumerate(train_loader), total=len(train_loader)
         ):
             img, mask_gt = img.to(device), mask_gt.to(device)
-            img_height, img_width = img.shape[2], img.shape[3]
-            mask_pred = model(img)
-            loss = loss_fn(mask_pred, mask_gt)
+            mask_pred_logit = model(img)
+            loss = loss_fn(mask_pred_logit, mask_gt)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             avg_loss += loss.item()
+            mask_pred = torch.argmax(mask_pred_logit, dim=1)
+        metric = metric_fn(mask_pred, mask_gt)
         avg_loss = avg_loss / len(train_loader)
-        print("avg loss: ", avg_loss, "lr: ", lr)
+        print("avg loss: ", avg_loss, "lr: ", lr, "metric(mIoU): ", metric)
 
 
 if __name__ == "__main__":

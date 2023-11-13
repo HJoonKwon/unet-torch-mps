@@ -1,3 +1,4 @@
+import os
 import argparse
 import torch
 import torch.nn.functional as F
@@ -11,8 +12,11 @@ def main(*args):
     args = args[0]
     num_classes = args.c
     epochs = args.e
-    lr = args.lrd
+    lr = args.lr
+    ckpt_interval = args.ci
     device = "mps" if torch.backends.mps.is_available() else "cpu"
+    ckpt_save_dir = "ckpt"
+    os.makedirs(ckpt_save_dir, exist_ok=True)
 
     model = Unet(3, num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -44,7 +48,15 @@ def main(*args):
         metric = metric_fn(mask_pred, mask_gt)
         avg_loss = avg_loss / len(train_loader)
         print("avg loss: ", avg_loss, "lr: ", lr, "metric(mIoU): ", metric)
-
+        if (epoch + 1) % ckpt_interval == 0:
+            checkpoint = {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                # Include any other relevant information
+            }
+            torch.save(checkpoint, os.path.join(ckpt_save_dir, f"ckpt_{epoch}.pt"))
+    
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
@@ -55,5 +67,6 @@ if __name__ == "__main__":
     argparser.add_argument("-e", type=int, default=5, help="number of epochs")
     argparser.add_argument("-c", type=int, default=31, help="number of classes")
     argparser.add_argument("-b", type=int, default=4, help="batch size")
+    argparser.add_argument("-ci", type=int, default=5, help="ckpt interval")
     args = argparser.parse_args()
     main(args)

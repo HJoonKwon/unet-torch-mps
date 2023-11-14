@@ -14,6 +14,7 @@ def main(*args):
     epochs = args.e
     lr = args.lr
     ckpt_interval = args.ci
+    is_create_dataset = args.create_dataset
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     ckpt_save_dir = "ckpt"
     os.makedirs(ckpt_save_dir, exist_ok=True)
@@ -32,13 +33,13 @@ def main(*args):
     )
 
     train_dataset = CityScapesDataset(
-        img_and_mask_dir=training_data_dir, skip_img_mask_split=False
+        img_and_mask_dir=training_data_dir, skip_img_mask_split=not is_create_dataset
     )
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.b, shuffle=True, pin_memory=True, drop_last=True
     )
     valid_dataset = CityScapesDataset(
-        img_and_mask_dir=validation_data_dir, skip_img_mask_split=False
+        img_and_mask_dir=validation_data_dir, skip_img_mask_split=not is_create_dataset
     )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,
@@ -113,5 +114,6 @@ if __name__ == "__main__":
         action="store_true",
         help="sanity check mode. use validation data for training",
     )
+    argparser.add_argument("-create_dataset", action="store_true")
     args = argparser.parse_args()
     main(args)

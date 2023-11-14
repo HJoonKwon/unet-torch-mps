@@ -23,31 +23,71 @@ def main(*args):
     loss_fn = (
         torch.nn.CrossEntropyLoss() if num_classes > 1 else torch.nn.BCEWithLogitsLoss()
     )
-    metric_fn = IoU(num_classes=num_classes, task="multiclass", per_class=False).to(
-        device
+    metric_fn = IoU(num_classes=num_classes, task="multiclass", per_class=False)
+    data_dir = args.d
+    is_sanity_check = args.sanity_check
+    validation_data_dir = os.path.join(data_dir, "val")
+    training_data_dir = (
+        os.path.join(data_dir, "train") if not is_sanity_check else validation_data_dir
     )
 
-    train_dataset = CityScapesDataset(img_and_mask_dir=args.d, skip_img_mask_split=True)
+    train_dataset = CityScapesDataset(
+        img_and_mask_dir=training_data_dir, skip_img_mask_split=False
+    )
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.b, shuffle=True, pin_memory=True, drop_last=True
     )
+    valid_dataset = CityScapesDataset(
+        img_and_mask_dir=validation_data_dir, skip_img_mask_split=False
+    )
+    valid_loader = torch.utils.data.DataLoader(
+        valid_dataset,
+        batch_size=args.b,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=True,
+    )
+
     for epoch in range(epochs):
         print("epoch: ", epoch)
         avg_loss = 0
-        for batch_idx, (img, mask_gt) in tqdm(
-            enumerate(train_loader), total=len(train_loader)
-        ):
+        for batch_idx, (img, mask_gt) in enumerate(train_loader):
             img, mask_gt = img.to(device), mask_gt.to(device)
             mask_pred_logit = model(img)
             loss = loss_fn(mask_pred_logit, mask_gt)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            avg_loss += loss.item()
+            avg_loss = avg_loss / (batch_idx + 1) * batch_idx + loss.item() / (
+                batch_idx + 1
+            )
             mask_pred = torch.argmax(mask_pred_logit, dim=1)
-        metric = metric_fn(mask_pred, mask_gt)
-        avg_loss = avg_loss / len(train_loader)
-        print("avg loss: ", avg_loss, "lr: ", lr, "metric(mIoU): ", metric)
+            print(
+                f"training data({batch_idx}/{len(train_loader)}): avg loss: {avg_loss}, lr: {lr}"
+            )
+
+        metric = metric_fn(mask_pred.detach().cpu(), mask_gt.detach().cpu()).item()
+        print(f"training data: avg loss: {avg_loss}, metric(mIoU): {metric}, lr: {lr}")
+
+        with torch.no_grad():
+            valid_loss = 0
+            for batch_idx, (img, mask_gt) in tqdm(
+                enumerate(valid_loader), total=len(valid_loader)
+            ):
+                img, mask_gt = img.to(device), mask_gt.to(device)
+                model.eval()  # set model to evaluation mode
+                mask_pred_logit = model(img)
+                loss = loss_fn(mask_pred_logit, mask_gt)
+                valid_loss += loss.item()
+                mask_pred = torch.argmax(mask_pred_logit, dim=1)
+            valid_loss = valid_loss / len(valid_loader)
+            valid_metric = metric_fn(
+                mask_pred.detach().cpu(), mask_gt.detach().cpu()
+            ).item()
+            print(
+                f"validation data: avg loss: {valid_loss}, metric(mIoU): {valid_metric}"
+            )
+        model.train()  # set model to training mode
         if (epoch + 1) % ckpt_interval == 0:
             checkpoint = {
                 "epoch": epoch,
@@ -56,17 +96,22 @@ def main(*args):
                 # Include any other relevant information
             }
             torch.save(checkpoint, os.path.join(ckpt_save_dir, f"ckpt_{epoch}.pt"))
-    
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument(
-        "-d", type=str, default="../training_data/val", help="dataset directory"
+        "-d", type=str, default="../training_data", help="dataset directory"
     )
     argparser.add_argument("-lr", type=float, default=1e-3, help="learning rate")
     argparser.add_argument("-e", type=int, default=5, help="number of epochs")
     argparser.add_argument("-c", type=int, default=31, help="number of classes")
     argparser.add_argument("-b", type=int, default=4, help="batch size")
     argparser.add_argument("-ci", type=int, default=5, help="ckpt interval")
+    argparser.add_argument(
+        "-sanity_check",
+        action="store_true",
+        help="sanity check mode. use validation data for training",
+    )
     args = argparser.parse_args()
     main(args)

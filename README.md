@@ -15,3 +15,4 @@ TBD (training curve, mIoU, training time on M2Air-8GB, ...)
 - [ ] Add unit test for dataset class
 - [ ] Load checkpoint and resume training
 - [ ] Update readme 
+- [ ] make docker file 

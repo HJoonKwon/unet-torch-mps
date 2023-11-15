@@ -50,6 +50,7 @@ class CityScapesDataset(Dataset):
         save_dir: Optional[str] = None,
         augment: bool = False,
         skip_img_mask_split: bool = False,
+        img_size=(256, 256),  # (W, H)
     ):
         assert os.path.isdir(img_and_mask_dir)
         assert save_dir is None or os.path.isdir(save_dir)
@@ -64,6 +65,7 @@ class CityScapesDataset(Dataset):
                 ToTensorV2(),
             ]
         )
+        self.augment = self._construct_augmentation(*img_size) if augment else None
 
         if not save_dir:
             save_dir = os.path.join(img_and_mask_dir, "split")
@@ -79,7 +81,17 @@ class CityScapesDataset(Dataset):
                 img_and_mask = self.read_image_rgb(img_and_mask_path)
                 img, mask = self.split_image_and_mask(img_and_mask)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                img = (
+                    cv2.resize(img, img_size)
+                    if img.shape[0] != img_size[1] and img.shape[1] != img_size[0]
+                    else img
+                )
                 mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
+                mask = (
+                    cv2.resize(mask, img_size)
+                    if mask.shape[0] != img_size[1] and mask.shape[1] != img_size[0]
+                    else mask
+                )
                 file_name = os.path.basename(img_and_mask_path)
                 cv2.imwrite(os.path.join(self.img_dir, file_name), img)
                 cv2.imwrite(os.path.join(self.mask_dir, file_name), mask)
@@ -109,6 +121,25 @@ class CityScapesDataset(Dataset):
         mask_with_id = min_indices.astype(np.float32)
         return mask_with_id
 
+    def _construct_augmentation(self, img_width, img_height):
+        return A.Compose(
+            [
+                A.HorizontalFlip(p=0.5),
+                A.RandomFog(p=0.2),
+                A.RandomRain(p=0.2),
+                A.RGBShift(p=0.2),
+                A.RandomSunFlare(p=0.2),
+                A.MotionBlur(p=0.2),
+                A.Sharpen(p=0.2),
+                A.ISONoise(p=0.2),
+                A.RandomBrightnessContrast(p=0.2),
+                A.RandomGamma(p=0.2),
+                A.ShiftScaleRotate(scale_limit=0.1, rotate_limit=15, p=0.3),
+                A.Resize(img_height, img_width, p=1.0),
+            ],
+            p=0.9,
+        )
+
     def __len__(self):
         return len(self.img_and_mask_paths)
 
@@ -120,7 +151,9 @@ class CityScapesDataset(Dataset):
         img = self.read_image_rgb(img_path)
         mask = self.read_image_rgb(mask_path)
         mask = self._convert_mask_with_rgb_to_mask_with_id(mask, self.id_map_array)
-
+        if self.augment is not None:
+            transformed = self.augment(image=img, mask=mask)
+            img, mask = transformed["image"], transformed["mask"]
         transformed = self.normalize_and_to_tensor(image=img, mask=mask)
         img, mask = transformed["image"], transformed["mask"]
         return img, mask

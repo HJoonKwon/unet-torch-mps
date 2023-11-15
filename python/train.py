@@ -33,13 +33,17 @@ def main(*args):
     )
 
     train_dataset = CityScapesDataset(
-        img_and_mask_dir=training_data_dir, skip_img_mask_split=not is_create_dataset
+        img_and_mask_dir=training_data_dir,
+        skip_img_mask_split=not is_create_dataset,
+        augment=True,
     )
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.b, shuffle=True, pin_memory=True, drop_last=True
     )
     valid_dataset = CityScapesDataset(
-        img_and_mask_dir=validation_data_dir, skip_img_mask_split=not is_create_dataset
+        img_and_mask_dir=validation_data_dir,
+        skip_img_mask_split=not is_create_dataset,
+        augment=False,
     )
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset,

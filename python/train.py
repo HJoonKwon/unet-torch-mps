@@ -14,13 +14,21 @@ def main(*args):
     epochs = args.e
     lr = args.lr
     ckpt_interval = args.ci
+    ckpt_path = args.ckpt
     is_create_dataset = args.create_dataset
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     ckpt_save_dir = "ckpt"
     os.makedirs(ckpt_save_dir, exist_ok=True)
 
     model = Unet(3, num_classes).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters())
+    if ckpt_path is not None:
+        ckeckpoint = torch.load(ckpt_path)
+        epoch = ckeckpoint["epoch"]
+        model.load_state_dict(ckeckpoint["model_state_dict"])
+        optimizer.load_state_dict(ckeckpoint["optimizer_state_dict"])
+    else:
+        epoch = 0
     loss_fn = (
         torch.nn.CrossEntropyLoss() if num_classes > 1 else torch.nn.BCEWithLogitsLoss()
     )
@@ -53,7 +61,7 @@ def main(*args):
         drop_last=True,
     )
 
-    for epoch in range(epochs):
+    for epoch in range(epoch, epoch + epochs):
         print("epoch: ", epoch)
         avg_loss = 0
         for batch_idx, (img, mask_gt) in enumerate(train_loader):
@@ -119,5 +127,6 @@ if __name__ == "__main__":
         help="sanity check mode. use validation data for training",
     )
     argparser.add_argument("-create_dataset", action="store_true")
+    argparser.add_argument("-ckpt", type=str, default=None, help="ckpt path")
     args = argparser.parse_args()
     main(args)

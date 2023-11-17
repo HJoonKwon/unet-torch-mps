@@ -1,7 +1,12 @@
 import torch
 from unet_torch_mps.model.blocks import Conv1, Conv3, UpConv, MaxPool
 
-device = "mps" if torch.backends.mps.is_available() else "cpu"
+if torch.backends.mps.is_available():
+    device = "mps"
+elif torch.cuda.is_available():
+    device = "cuda"
+else:
+    device = "cpu"
 
 
 def test_Conv1():

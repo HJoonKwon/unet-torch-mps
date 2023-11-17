@@ -24,11 +24,16 @@ def main(*args):
     optimizer = torch.optim.Adam(model.parameters())
     if ckpt_path is not None:
         ckeckpoint = torch.load(ckpt_path)
-        epoch = ckeckpoint["epoch"]
+        start_epoch = ckeckpoint["epoch"]
         model.load_state_dict(ckeckpoint["model_state_dict"])
         optimizer.load_state_dict(ckeckpoint["optimizer_state_dict"])
+        train_loss = ckeckpoint["train_loss"]
+        valid_loss = ckeckpoint["valid_loss"]
+        print(
+            f"Loaded ckpt from: {ckpt_path} @ epoch: {start_epoch} with train_loss: {train_loss} and valid_loss: {valid_loss}"
+        )
     else:
-        epoch = 0
+        start_epoch = 0
     loss_fn = (
         torch.nn.CrossEntropyLoss() if num_classes > 1 else torch.nn.BCEWithLogitsLoss()
     )
@@ -61,9 +66,9 @@ def main(*args):
         drop_last=True,
     )
 
-    for epoch in range(epoch, epoch + epochs):
+    for epoch in range(start_epoch, start_epoch + epochs):
         print("epoch: ", epoch)
-        avg_loss = 0
+        train_loss = 0
         for batch_idx, (img, mask_gt) in enumerate(train_loader):
             img, mask_gt = img.to(device), mask_gt.to(device)
             mask_pred_logit = model(img)
@@ -71,16 +76,18 @@ def main(*args):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            avg_loss = avg_loss / (batch_idx + 1) * batch_idx + loss.item() / (
+            train_loss = train_loss / (batch_idx + 1) * batch_idx + loss.item() / (
                 batch_idx + 1
             )
             mask_pred = torch.argmax(mask_pred_logit, dim=1)
             print(
-                f"training data({batch_idx}/{len(train_loader)}): avg loss: {avg_loss}, lr: {lr}"
+                f"training data({batch_idx}/{len(train_loader)}): avg loss: {train_loss}, lr: {lr}"
             )
 
         metric = metric_fn(mask_pred.detach().cpu(), mask_gt.detach().cpu()).item()
-        print(f"training data: avg loss: {avg_loss}, metric(mIoU): {metric}, lr: {lr}")
+        print(
+            f"training data: avg loss: {train_loss}, metric(mIoU): {metric}, lr: {lr}"
+        )
 
         with torch.no_grad():
             valid_loss = 0
@@ -106,6 +113,8 @@ def main(*args):
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "train_loss": train_loss,
+                "valid_loss": valid_loss,
                 # Include any other relevant information
             }
             torch.save(checkpoint, os.path.join(ckpt_save_dir, f"ckpt_{epoch}.pt"))
@@ -120,7 +129,7 @@ if __name__ == "__main__":
     argparser.add_argument("-e", type=int, default=5, help="number of epochs")
     argparser.add_argument("-c", type=int, default=31, help="number of classes")
     argparser.add_argument("-b", type=int, default=4, help="batch size")
-    argparser.add_argument("-ci", type=int, default=5, help="ckpt interval")
+    argparser.add_argument("-ci", type=int, default=1, help="ckpt interval")
     argparser.add_argument(
         "-sanity_check",
         action="store_true",

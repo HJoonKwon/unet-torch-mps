@@ -118,8 +118,7 @@ class CityScapesDataset(Dataset):
             axis=2
         )  # (H, W, 30)
         min_indices = np.argmin(distance, axis=2)  # (H, W)
-        mask_with_id = min_indices.astype(np.float32)
-        return mask_with_id
+        return min_indices
 
     def _construct_augmentation(self, img_width, img_height):
         return A.Compose(

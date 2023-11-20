@@ -6,6 +6,7 @@ from tqdm import tqdm
 from unet_torch_mps.model.unet import Unet
 from unet_torch_mps.dataset.cityscapes import CityScapesDataset
 from unet_torch_mps.metrics.iou import calculate_mean_iou
+from unet_torch_mps.loss.dice import DiceLoss
 
 
 def main(*args):
@@ -42,6 +43,7 @@ def main(*args):
     loss_fn = (
         torch.nn.CrossEntropyLoss() if num_classes > 1 else torch.nn.BCEWithLogitsLoss()
     )
+    dice_loss_fn = DiceLoss()
     data_dir = args.d
     is_sanity_check = args.sanity_check
     validation_data_dir = os.path.join(data_dir, "val")
@@ -77,7 +79,9 @@ def main(*args):
         for batch_idx, (img, mask_gt) in enumerate(train_loader):
             img, mask_gt = img.to(device), mask_gt.to(device)
             mask_pred_logit = model(img)
-            loss = loss_fn(mask_pred_logit, mask_gt)
+            loss = loss_fn(mask_pred_logit, mask_gt) + dice_loss_fn(
+                mask_pred_logit, mask_gt
+            )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -103,7 +107,9 @@ def main(*args):
                 img, mask_gt = img.to(device), mask_gt.to(device)
                 model.eval()  # set model to evaluation mode
                 mask_pred_logit = model(img)
-                loss = loss_fn(mask_pred_logit, mask_gt)
+                loss = loss_fn(mask_pred_logit, mask_gt) + dice_loss_fn(
+                    mask_pred_logit, mask_gt
+                )
                 valid_loss += loss.item()
                 batch_miou = calculate_mean_iou(mask_pred_logit, mask_gt)
                 total_miou += batch_miou

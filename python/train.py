@@ -27,7 +27,7 @@ def main(*args):
     os.makedirs(ckpt_save_dir, exist_ok=True)
 
     model = Unet(3, num_classes).to(device)
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     if ckpt_path is not None:
         ckeckpoint = torch.load(ckpt_path)
         start_epoch = ckeckpoint["epoch"]

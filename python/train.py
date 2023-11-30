@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
 from unet_torch_mps.model.unet import Unet
 from unet_torch_mps.dataset.cityscapes import CityScapesDataset
@@ -85,6 +86,7 @@ def main(*args):
             )
             optimizer.zero_grad()
             loss.backward()
+            clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             train_loss = train_loss / (batch_idx + 1) * batch_idx + loss.item() / (
                 batch_idx + 1

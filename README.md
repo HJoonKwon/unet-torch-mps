@@ -19,3 +19,4 @@ TBD (training curve, mIoU, training time on M2Air-8GB, ...)
 - [ ] logger instead of print 
 - [ ] wandb instead of terminal 
 - [ ] torch compile
+- [ ] implement scheduler 

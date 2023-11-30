@@ -101,6 +101,7 @@ def main(*args):
             f"training data: epoch loss: {train_loss}, epoch metric(mIoU): {mean_iou}"
         )
 
+        model.eval()  # set model to evaluation mode
         with torch.no_grad():
             valid_loss = 0
             total_miou = 0
@@ -108,7 +109,6 @@ def main(*args):
                 enumerate(valid_loader), total=len(valid_loader)
             ):
                 img, mask_gt = img.to(device), mask_gt.to(device)
-                model.eval()  # set model to evaluation mode
                 mask_pred_logit = model(img)
                 loss = loss_fn(mask_pred_logit, mask_gt) + dice_loss_fn(
                     mask_pred_logit, mask_gt

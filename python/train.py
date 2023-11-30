@@ -74,6 +74,7 @@ def main(*args):
 
     for epoch in range(start_epoch, start_epoch + epochs):
         print("epoch: ", epoch)
+        model.train()
         train_loss = 0
         total_miou = 0
         for batch_idx, (img, mask_gt) in enumerate(train_loader):
@@ -116,7 +117,6 @@ def main(*args):
             mean_iou = total_miou / (batch_idx + 1)
             valid_loss = valid_loss / len(valid_loader)
             print(f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}")
-        model.train()  # set model to training mode
         if (epoch + 1) % ckpt_interval == 0:
             checkpoint = {
                 "epoch": epoch,

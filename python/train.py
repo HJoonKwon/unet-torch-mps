@@ -1,4 +1,5 @@
 import os
+import logging
 import argparse
 import torch
 import torch.nn.functional as F
@@ -45,7 +46,7 @@ def generate_dataloader(
     return train_loader, valid_loader
 
 
-def load_checkpoint(model, optimizer, ckpt_path):
+def load_checkpoint(model, optimizer, ckpt_path, logger):
     if ckpt_path is not None:
         ckeckpoint = torch.load(ckpt_path)
         start_epoch = ckeckpoint["epoch"] + 1
@@ -53,7 +54,7 @@ def load_checkpoint(model, optimizer, ckpt_path):
         optimizer.load_state_dict(ckeckpoint["optimizer_state_dict"])
         train_loss = ckeckpoint["train_loss"]
         valid_loss = ckeckpoint["valid_loss"]
-        print(
+        logger.info(
             f"Loaded ckpt from: {ckpt_path} @ epoch: {ckeckpoint['epoch']} with train_loss: {train_loss} and valid_loss: {valid_loss}"
         )
     else:
@@ -61,7 +62,7 @@ def load_checkpoint(model, optimizer, ckpt_path):
     return start_epoch
 
 
-def train_epoch(model, train_loader, optimizer, loss_fns: list, device):
+def train_epoch(model, train_loader, optimizer, loss_fns: list, device, logger):
     model.train()
     train_loss = 0
     total_miou = 0
@@ -81,7 +82,7 @@ def train_epoch(model, train_loader, optimizer, loss_fns: list, device):
         )
         bactch_miou = calculate_mean_iou(mask_pred_logit, mask_gt)
         total_miou += bactch_miou
-        print(
+        logger.info(
             f"training data({batch_idx}/{len(train_loader)}): avg loss: {train_loss}"
         )
     mean_iou = total_miou / (batch_idx + 1)
@@ -110,6 +111,18 @@ def evaluate_epoch(model, valid_loader, loss_fns, device):
     return valid_loss, mean_iou
 
 
+def set_logger():
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+    return logger
+
+
 def main(*args):
     args = args[0]
     num_classes = args.c
@@ -126,6 +139,7 @@ def main(*args):
         device = "cpu"
     ckpt_save_dir = "ckpt"
     os.makedirs(ckpt_save_dir, exist_ok=True)
+    logger = set_logger()
 
     model = Unet(3, num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -137,7 +151,7 @@ def main(*args):
     train_loader, valid_loader = generate_dataloader(
         args.d, args.sanity_check, is_create_dataset, args.b
     )
-    start_epoch = load_checkpoint(model, optimizer, ckpt_path)
+    start_epoch = load_checkpoint(model, optimizer, ckpt_path, logger)
 
     best_score = {
         "loss": {"epoch": 0, "value": float("inf")},
@@ -145,25 +159,27 @@ def main(*args):
     }
 
     for epoch in range(start_epoch, start_epoch + epochs):
-        print("epoch: ", epoch, "lr: ", lr)
+        logger.info(f"epoch: {epoch}, lr:  {lr}")
         train_loss, mean_iou = train_epoch(
-            model, train_loader, optimizer, [loss_fn, dice_loss_fn], device
+            model, train_loader, optimizer, [loss_fn, dice_loss_fn], device, logger
         )
-        print(
+        logger.info(
             f"training data: epoch loss: {train_loss}, epoch metric(mIoU): {mean_iou}"
         )
 
         valid_loss, mean_iou = evaluate_epoch(
             model, valid_loader, [loss_fn, dice_loss_fn], device
         )
-        print(f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}")
+        logger.info(
+            f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}"
+        )
         if valid_loss < best_score["loss"]["value"]:
             best_score["loss"]["epoch"] = epoch
             best_score["loss"]["value"] = valid_loss
         if mean_iou > best_score["miou"]["value"]:
             best_score["miou"]["epoch"] = epoch
             best_score["miou"]["value"] = mean_iou
-        print(f"best score: {best_score}")
+        logger.info(f"best score: {best_score}")
 
         if (epoch + 1) % ckpt_interval == 0:
             checkpoint = {

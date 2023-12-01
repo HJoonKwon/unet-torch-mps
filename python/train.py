@@ -139,6 +139,11 @@ def main(*args):
     )
     start_epoch = load_checkpoint(model, optimizer, ckpt_path)
 
+    best_score = {
+        "loss": {"epoch": 0, "value": float("inf")},
+        "miou": {"epoch": 0, "value": 0},
+    }
+
     for epoch in range(start_epoch, start_epoch + epochs):
         print("epoch: ", epoch, "lr: ", lr)
         train_loss, mean_iou = train_epoch(
@@ -152,6 +157,13 @@ def main(*args):
             model, valid_loader, [loss_fn, dice_loss_fn], device
         )
         print(f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}")
+        if valid_loss < best_score["loss"]["value"]:
+            best_score["loss"]["epoch"] = epoch
+            best_score["loss"]["value"] = valid_loss
+        if mean_iou > best_score["miou"]["value"]:
+            best_score["miou"]["epoch"] = epoch
+            best_score["miou"]["value"] = mean_iou
+        print(f"best score: {best_score}")
 
         if (epoch + 1) % ckpt_interval == 0:
             checkpoint = {

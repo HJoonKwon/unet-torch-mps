@@ -5,6 +5,9 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
+import sys 
+sys.path.append(os.path.join(os.path.dirname(__file__), "../python"))
+
 from unet_torch_mps.model.unet import Unet
 from unet_torch_mps.dataset.cityscapes import CityScapesDataset
 from unet_torch_mps.metrics.iou import calculate_mean_iou
@@ -137,7 +140,7 @@ def main(*args):
         device = "cuda"
     else:
         device = "cpu"
-    ckpt_save_dir = "ckpt"
+    ckpt_save_dir = "../ckpt"
     os.makedirs(ckpt_save_dir, exist_ok=True)
     logger = set_logger()
 

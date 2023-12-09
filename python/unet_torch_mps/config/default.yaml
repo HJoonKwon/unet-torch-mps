@@ -1,0 +1,5 @@
+"
+Default configuration file for unet_torch_mps
+This file is overwritten by the config file specified by the user
+during the execution of the program.
+"

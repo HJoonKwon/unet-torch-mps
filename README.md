@@ -3,6 +3,32 @@
 ## Installation 
 TBD (requirements.txt)
 
+## Folder structure 
+```bash
+ ❯ tree -L 2
+.
+├── __init__.py
+├── config
+│   └── default.yaml
+├── dataset
+│   ├── __init__.py
+│   └── cityscapes.py
+├── loss
+│   ├── __init__.py
+│   └── dice.py
+├── metrics
+│   ├── __init__.py
+│   └── iou.py
+├── model
+│   ├── __init__.py
+│   ├── blocks.py
+│   └── unet.py
+├── train
+│   └── trainer.py
+└── utils
+    └── utils.py
+```
+
 ## RUN 
 TBD (scripts e.g. train, unit test, download dataset...)
 

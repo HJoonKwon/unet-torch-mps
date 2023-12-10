@@ -34,7 +34,7 @@ class Trainer:
         self.logger.info(f"Trainer:: Starting epoch: {self.start_epoch}")
 
     def train(self):
-        for epoch in range(self.start_epoch, self.num_epochs):
+        for epoch in range(self.start_epoch, self.start_epoch + self.num_epochs):
             self.logger.info(f"Trainer:: Training epoch: {epoch}")
             train_loss, train_miou = self.train_epoch()
             self.logger.info(

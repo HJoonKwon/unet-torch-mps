@@ -1,3 +1,4 @@
+import os 
 from tqdm import tqdm
 import torch
 from torch.nn.utils import clip_grad_norm_
@@ -17,6 +18,8 @@ class Trainer:
         self.valid_data_loader = valid_data_loader
         self.device = config["device"]
         self.ckpt_path = config["ckpt"]
+        self.ckpt_saving_dir = config["ckpt_saving_dir"]
+        self.ckpt_interval = config["ckpt_interval"]
         self.loss_fns = loss_fns
         self.logger = set_logger()
         if self.ckpt_path is not None:
@@ -51,6 +54,10 @@ class Trainer:
             )
             self.save_best(valid_loss, valid_miou, epoch)
             self.logger.info(f"Trainer:: Best score: {self.best_score}")
+            
+            if (epoch + 1) % self.ckpt_interval == 0:
+                self.save_ckpt(epoch, train_loss, valid_loss, valid_miou)
+                self.logger.info(f"Trainer:: Saved ckpt at epoch: {epoch}")
 
     def train_iter(self, img, mask_gt):
         mask_pred_logit = self.model(img)
@@ -115,3 +122,14 @@ class Trainer:
         if miou > self.best_score["miou"]["value"]:
             self.best_score["miou"]["epoch"] = epoch
             self.best_score["miou"]["value"] = miou
+
+    def save_ckpt(self, epoch, train_loss, valid_loss, miou):
+        ckpt = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "train_loss": train_loss,
+            "valid_loss": valid_loss,
+            "miou": miou,
+        }
+        torch.save(ckpt, os.path.join(self.ckpt_saving_dir, f"ckpt_{epoch}.pt"))

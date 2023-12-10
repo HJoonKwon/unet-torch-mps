@@ -29,6 +29,11 @@ class Trainer:
         assert self.device in ["cpu", "cuda", "mps"]
         assert self.model.device == self.device
 
+        self.best_score = {
+            "loss": {"epoch": 0, "value": float("inf")},
+            "miou": {"epoch": 0, "value": 0},
+        }
+
         self.logger.info(f"Trainer:: Using model: {self.model}")
         self.logger.info(f"Trainer:: Using device: {self.device}")
         self.logger.info(f"Trainer:: Starting epoch: {self.start_epoch}")
@@ -44,7 +49,8 @@ class Trainer:
             self.logger.info(
                 f"Trainer:: Training epoch: {epoch} with valid_loss: {valid_loss} and valid_miou: {valid_miou}"
             )
-            self.save_best()
+            self.save_best(valid_loss, valid_miou, epoch)
+            self.logger.info(f"Trainer:: Best score: {self.best_score}")
 
     def train_iter(self, img, mask_gt):
         mask_pred_logit = self.model(img)
@@ -102,5 +108,10 @@ class Trainer:
             avg_loss = total_loss / (batch_idx + 1)
         return avg_loss, avg_miou
 
-    def save_best(self):
-        pass 
+    def save_best(self, loss, miou, epoch):
+        if loss < self.best_score["loss"]["value"]:
+            self.best_score["loss"]["epoch"] = epoch
+            self.best_score["loss"]["value"] = loss
+        if miou > self.best_score["miou"]["value"]:
+            self.best_score["miou"]["epoch"] = epoch
+            self.best_score["miou"]["value"] = miou

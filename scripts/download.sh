@@ -16,6 +16,5 @@ pip install kaggle --upgrade
 kaggle datasets download -d dansbecker/cityscapes-image-pairs
 unzip cityscapes-image-pairs.zip
 rm cityscapes-image-pairs.zip
-mv cityscapes_data/train training_data/
-mv cityscapes_data/val training_data/
+./preprocess.py
 rm -rf cityscapes_data

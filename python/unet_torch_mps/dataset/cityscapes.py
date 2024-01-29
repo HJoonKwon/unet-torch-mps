@@ -47,13 +47,10 @@ class CityScapesDataset(Dataset):
     def __init__(
         self,
         img_and_mask_dir: str,
-        save_dir: Optional[str] = None,
         augment: bool = False,
-        skip_img_mask_split: bool = False,
         img_size=(256, 256),  # (W, H)
     ):
         assert os.path.isdir(img_and_mask_dir)
-        assert save_dir is None or os.path.isdir(save_dir)
         self.img_and_mask_dir = img_and_mask_dir
         self.img_and_mask_paths = glob(os.path.join(img_and_mask_dir, "*.jpg"))
         self.id_map_array = np.zeros((3, len(id_map)), dtype=np.uint8)
@@ -67,45 +64,10 @@ class CityScapesDataset(Dataset):
         )
         self.augment = self._construct_augmentation(*img_size) if augment else None
 
-        if not save_dir:
-            save_dir = os.path.join(img_and_mask_dir, "split")
-        self.img_dir = os.path.join(save_dir, "img")
-        self.mask_dir = os.path.join(save_dir, "mask")
-
-        if not skip_img_mask_split:
-            os.makedirs(self.img_dir, exist_ok=True)
-            os.makedirs(self.mask_dir, exist_ok=True)
-
-            # split image and mask
-            for i, img_and_mask_path in tqdm(enumerate(self.img_and_mask_paths)):
-                img_and_mask = self.read_image_rgb(img_and_mask_path)
-                img, mask = self.split_image_and_mask(img_and_mask)
-                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                img = (
-                    cv2.resize(img, img_size)
-                    if img.shape[0] != img_size[1] and img.shape[1] != img_size[0]
-                    else img
-                )
-                mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
-                mask = (
-                    cv2.resize(mask, img_size)
-                    if mask.shape[0] != img_size[1] and mask.shape[1] != img_size[0]
-                    else mask
-                )
-                file_name = os.path.basename(img_and_mask_path)
-                cv2.imwrite(os.path.join(self.img_dir, file_name), img)
-                cv2.imwrite(os.path.join(self.mask_dir, file_name), mask)
-
     def read_image_rgb(self, img_path):
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
-
-    def split_image_and_mask(self, img_and_mask):
-        height = img_and_mask.shape[0]
-        img = img_and_mask[:, :height]
-        mask = img_and_mask[:, height:]
-        return img, mask
 
     def _convert_mask_with_rgb_to_mask_with_id(
         self, mask: np.ndarray, id_map_array: np.ndarray

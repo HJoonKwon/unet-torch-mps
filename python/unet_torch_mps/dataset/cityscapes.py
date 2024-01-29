@@ -72,18 +72,29 @@ class CityScapesDataset(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
 
-    def _convert_mask_with_rgb_to_mask_with_id(
-        self, mask: np.ndarray, id_map_array: np.ndarray
-    ):
-        assert mask.shape[2] == 3  # RGB
-        assert id_map_array.shape[0] == 3  # RGB
-        mask_expanded = mask[:, :, :, None]  # (H, W, 3, 1)
-        id_map_array_expanded = id_map_array[None, None, :, :]  # (1, 1, 3, 30)
-        distance = ((id_map_array_expanded - mask_expanded) ** 2).sum(
-            axis=2
-        )  # (H, W, 30)
-        min_indices = np.argmin(distance, axis=2)  # (H, W)
-        return min_indices
+    def _convert_mask_with_rgb_to_mask_with_id(self, mask: np.ndarray):
+        """
+        Reference:
+            1. https://www.kaggle.com/code/tr1gg3rtrash/car-driving-segmentation-unet-from-scratch
+            2. https://github.com/WhiteWolf47/cscapes_semantic_segmentation
+        """
+        mask = np.zeros(shape=(mask.shape[0], mask.shape[1]), dtype=np.uint8)
+        for row in range(mask.shape[0]):
+            for col in range(mask.shape[1]):
+                a = mask[row, col]
+                final_key = None
+                final_d = None
+                for key, value in id_map.items():
+                    d = np.sum(np.linalg.norm(value - a))
+                    if final_key == None:
+                        final_d = d
+                        final_key = key
+                    elif d < final_d:
+                        final_d = d
+                        final_key = key
+                mask[row, col] = final_key
+        mask = mask.reshape(mask.shape[0], mask.shape[1], 1)
+        return mask
 
     def _construct_augmentation(self, img_width, img_height):
         return A.Compose(
@@ -110,7 +121,7 @@ class CityScapesDataset(Dataset):
     def __getitem__(self, idx):
         img = self.read_image_rgb(self.img_files[idx])
         mask = self.read_image_rgb(self.mask_files[idx])
-        mask = self._convert_mask_with_rgb_to_mask_with_id(mask, self.id_map_array)
+        mask = self._convert_mask_with_rgb_to_mask_with_id(mask)
         if self.augment is not None:
             transformed = self.augment(image=img, mask=mask)
             img, mask = transformed["image"], transformed["mask"]

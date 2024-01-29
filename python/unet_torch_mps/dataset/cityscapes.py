@@ -46,13 +46,16 @@ id_map = {
 class CityScapesDataset(Dataset):
     def __init__(
         self,
-        img_and_mask_dir: str,
+        data_dir: str,
+        split: str = "train",  # 'train' or 'val'
         augment: bool = False,
         img_size=(256, 256),  # (W, H)
     ):
-        assert os.path.isdir(img_and_mask_dir)
-        self.img_and_mask_dir = img_and_mask_dir
-        self.img_and_mask_paths = glob(os.path.join(img_and_mask_dir, "*.jpg"))
+        data_dir = os.path.join(data_dir, split)
+        assert os.path.isdir(data_dir)
+        self.data_dir = data_dir
+        self.img_files = glob(os.path.join(data_dir, "img/*.jpg"))
+        self.mask_files = glob(os.path.join(data_dir, "mask/*.jpg"))
         self.id_map_array = np.zeros((3, len(id_map)), dtype=np.uint8)
         for key, val in id_map.items():
             self.id_map_array[:, key] = np.array(val)
@@ -102,15 +105,11 @@ class CityScapesDataset(Dataset):
         )
 
     def __len__(self):
-        return len(self.img_and_mask_paths)
+        return len(self.img_files)
 
     def __getitem__(self, idx):
-        img_mask_path = self.img_and_mask_paths[idx]
-        filename = os.path.basename(img_mask_path)
-        img_path = os.path.join(self.img_dir, filename)
-        mask_path = os.path.join(self.mask_dir, filename)
-        img = self.read_image_rgb(img_path)
-        mask = self.read_image_rgb(mask_path)
+        img = self.read_image_rgb(self.img_files[idx])
+        mask = self.read_image_rgb(self.mask_files[idx])
         mask = self._convert_mask_with_rgb_to_mask_with_id(mask, self.id_map_array)
         if self.augment is not None:
             transformed = self.augment(image=img, mask=mask)

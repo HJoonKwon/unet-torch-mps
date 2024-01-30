@@ -41,7 +41,8 @@ id_map = {
     29: (119, 11, 32),  # bicycle
     30: (0, 0, 142),  # license plate
 }
-
+id_values = np.array(list(id_map.values()), dtype=np.uint8)
+id_keys = np.array(list(id_map.keys()), dtype=np.uint8)
 
 class CityScapesDataset(Dataset):
     def __init__(
@@ -78,22 +79,10 @@ class CityScapesDataset(Dataset):
             1. https://www.kaggle.com/code/tr1gg3rtrash/car-driving-segmentation-unet-from-scratch
             2. https://github.com/WhiteWolf47/cscapes_semantic_segmentation
         """
-        mask = np.zeros(shape=(mask.shape[0], mask.shape[1]), dtype=np.uint8)
-        for row in range(mask.shape[0]):
-            for col in range(mask.shape[1]):
-                a = mask[row, col]
-                final_key = None
-                final_d = None
-                for key, value in id_map.items():
-                    d = np.sum(np.linalg.norm(value - a))
-                    if final_key == None:
-                        final_d = d
-                        final_key = key
-                    elif d < final_d:
-                        final_d = d
-                        final_key = key
-                mask[row, col] = final_key
-        mask = mask.reshape(mask.shape[0], mask.shape[1], 1)
+        values = id_values.reshape(1, 1, -1, 3)
+        mask = mask.reshape(mask.shape[0], mask.shape[1], 1, -1)
+        min_indexes = np.argmin(np.linalg.norm(values-mask, axis=3), axis=2)
+        mask = id_keys[min_indexes][:, :, np.newaxis]
         return mask
 
     def _construct_augmentation(self, img_width, img_height):

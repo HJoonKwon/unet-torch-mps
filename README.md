@@ -1,46 +1,44 @@
 # unet-torch-mps
 
 ## Installation 
-TBD (requirements.txt)
-
-## Folder structure 
+### Install PyTorch that corresponds with your device. 
+```bash 
+$ conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+```
+### Install dependencies 
+if something's missing, please install them with pip.
 ```bash
- ❯ tree -L 2
-.
-├── __init__.py
-├── config
-│   └── default.yaml
-├── dataset
-│   ├── __init__.py
-│   └── cityscapes.py
-├── loss
-│   ├── __init__.py
-│   └── dice.py
-├── metrics
-│   ├── __init__.py
-│   └── iou.py
-├── model
-│   ├── __init__.py
-│   ├── blocks.py
-│   └── unet.py
-├── train
-│   └── trainer.py
-└── utils
-    └── utils.py
+$ pip install -r requirements.txt
 ```
 
 ## RUN 
-TBD (scripts e.g. train, unit test, download dataset...)
+```bash
+$ cd scripts && bash download.sh
+```
+Go to ```unet-torch-mps/python``` and run
 
-## Result 
-TBD (training curve, mIoU, training time on M2Air-8GB, ...)
+```bash
+$ python train.py --help
+
+usage: train.py [-h] [-d D] [-lr LR] [-e E] [-c C] [-b B] [-ci CI] [-sanity_check] [-ckpt CKPT]
+
+options:
+  -h, --help     show this help message and exit
+  -d D           dataset directory
+  -lr LR         learning rate
+  -e E           number of epochs
+  -c C           number of classes
+  -b B           batch size
+  -ci CI         ckpt interval
+  -sanity_check  sanity check mode. use validation data for training
+  -ckpt CKPT     ckpt path
+```
 
 ## TODO 
 - [ ] Refactor train.py in OOP way 
 - [x] Update loss function to better one 
-- [ ] Add unit test for dataset class
 - [x] Load checkpoint and resume training
-- [ ] Update readme 
+- [x] Update readme 
 - [ ] make docker file 
 - [x] logger instead of print 
 - [ ] wandb instead of terminal 

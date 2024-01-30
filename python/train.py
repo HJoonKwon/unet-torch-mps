@@ -5,48 +5,26 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
-import sys 
-sys.path.append(os.path.join(os.path.dirname(__file__), "../python"))
-
 from unet_torch_mps.model.unet import Unet
 from unet_torch_mps.dataset.cityscapes import CityScapesDataset
-from unet_torch_mps.metrics.iou import calculate_mean_iou
-from unet_torch_mps.loss.dice import DiceLoss
 
 
-def generate_dataloader(
-    data_dir: str, is_sanity_check: bool, is_create_dataset: bool, batch_size: int
-):
-    validation_data_dir = os.path.join(data_dir, "val")
-    training_data_dir = (
-        os.path.join(data_dir, "train") if not is_sanity_check else validation_data_dir
+def generate_dataloader(data_dir: str, split: str, batch_size: int):
+    assert split in ["train", "val"]
+    shuffle = drop_last = augment = split == "train"
+    dataset = CityScapesDataset(
+        data_dir=data_dir,
+        split=split,
+        augment=augment,
     )
-
-    train_dataset = CityScapesDataset(
-        img_and_mask_dir=training_data_dir,
-        skip_img_mask_split=not is_create_dataset,
-        augment=True,
-    )
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=shuffle,
         pin_memory=True,
-        drop_last=True,
+        drop_last=drop_last,
     )
-    valid_dataset = CityScapesDataset(
-        img_and_mask_dir=validation_data_dir,
-        skip_img_mask_split=not is_create_dataset,
-        augment=False,
-    )
-    valid_loader = torch.utils.data.DataLoader(
-        valid_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        pin_memory=True,
-        drop_last=True,
-    )
-    return train_loader, valid_loader
+    return data_loader
 
 
 def load_checkpoint(model, optimizer, ckpt_path, logger):
@@ -65,53 +43,49 @@ def load_checkpoint(model, optimizer, ckpt_path, logger):
     return start_epoch
 
 
-def train_epoch(model, train_loader, optimizer, loss_fns: list, device, logger):
+def train_epoch(model, train_loader, optimizer, device, logger):
     model.train()
-    train_loss = 0
-    total_miou = 0
-    cross_entropy_loss_fn, dice_loss_fn = loss_fns
-    for batch_idx, (img, mask_gt) in enumerate(train_loader):
-        img, mask_gt = img.to(device), mask_gt.to(device)
-        mask_pred_logit = model(img)
-        loss = cross_entropy_loss_fn(mask_pred_logit, mask_gt) + dice_loss_fn(
-            mask_pred_logit, mask_gt
-        )
-        optimizer.zero_grad()
+    epoch_loss = 0
+    for batch_idx, (img, target) in enumerate(train_loader):
+        img, target = img.to(device), target.to(device)
+        pred = model(img)
+        B, C, H, W = pred.shape
+        pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
+        target = target.view(B * H * W)
+        loss = F.cross_entropy(pred, target)
+        optimizer.zero_grad(set_to_none=True)
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        train_loss = train_loss / (batch_idx + 1) * batch_idx + loss.item() / (
-            batch_idx + 1
-        )
-        bactch_miou = calculate_mean_iou(mask_pred_logit, mask_gt)
-        total_miou += bactch_miou
+        epoch_loss += loss.item()
         logger.info(
-            f"training data({batch_idx}/{len(train_loader)}): avg loss: {train_loss}"
+            f"training data({batch_idx}/{len(train_loader)}): iter loss: {loss.item()}"
         )
-    mean_iou = total_miou / (batch_idx + 1)
-    return train_loss, mean_iou
+    return epoch_loss / (batch_idx + 1)
 
 
-def evaluate_epoch(model, valid_loader, loss_fns, device):
+def evaluate_epoch(model, valid_loader, device):
     model.eval()  # set model to evaluation mode
-    cross_entropy_loss_fn, dice_loss_fn = loss_fns
     with torch.no_grad():
-        valid_loss = 0
-        total_miou = 0
-        for batch_idx, (img, mask_gt) in tqdm(
+        epoch_loss = 0
+        epoch_iou = 0
+        for batch_idx, (img, target) in tqdm(
             enumerate(valid_loader), total=len(valid_loader)
         ):
-            img, mask_gt = img.to(device), mask_gt.to(device)
-            mask_pred_logit = model(img)
-            loss = cross_entropy_loss_fn(mask_pred_logit, mask_gt) + dice_loss_fn(
-                mask_pred_logit, mask_gt
-            )
-            valid_loss += loss.item()
-            batch_miou = calculate_mean_iou(mask_pred_logit, mask_gt)
-            total_miou += batch_miou
-        mean_iou = total_miou / (batch_idx + 1)
-        valid_loss = valid_loss / len(valid_loader)
-    return valid_loss, mean_iou
+            img, target = img.to(device), target.to(device)
+            pred = model(img)
+            pred_argmax = F.softmax(pred, dim=1).argmax(1)
+            iou = (pred_argmax == target.squeeze()).float().mean()
+            epoch_iou += iou.item()
+
+            B, C, H, W = pred.shape
+            pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
+            target = target.view(B * H * W)
+            loss = F.cross_entropy(pred, target)
+            epoch_loss += loss.item()
+        epoch_loss = epoch_loss / (batch_idx + 1)
+        epoch_iou = epoch_iou / (batch_idx + 1)
+    return epoch_loss, epoch_iou
 
 
 def set_logger():
@@ -133,7 +107,6 @@ def main(*args):
     lr = args.lr
     ckpt_interval = args.ci
     ckpt_path = args.ckpt
-    is_create_dataset = args.create_dataset
     if torch.backends.mps.is_available():
         device = "mps"
     elif torch.cuda.is_available():
@@ -144,15 +117,15 @@ def main(*args):
     os.makedirs(ckpt_save_dir, exist_ok=True)
     logger = set_logger()
 
+    logger.info(f"device: {device}")
     model = Unet(3, num_classes).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-    loss_fn = (
-        torch.nn.CrossEntropyLoss() if num_classes > 1 else torch.nn.BCEWithLogitsLoss()
-    )
-    dice_loss_fn = DiceLoss()
-    train_loader, valid_loader = generate_dataloader(
-        args.d, args.sanity_check, is_create_dataset, args.b
+    valid_loader = generate_dataloader(args.d, "val", args.b)
+    train_loader = (
+        generate_dataloader(args.d, "train", args.b)
+        if not args.sanity_check
+        else valid_loader
     )
     start_epoch = load_checkpoint(model, optimizer, ckpt_path, logger)
 
@@ -163,28 +136,30 @@ def main(*args):
 
     for epoch in range(start_epoch, start_epoch + epochs):
         logger.info(f"epoch: {epoch}, lr:  {lr}")
-        train_loss, mean_iou = train_epoch(
-            model, train_loader, optimizer, [loss_fn, dice_loss_fn], device, logger
-        )
-        logger.info(
-            f"training data: epoch loss: {train_loss}, epoch metric(mIoU): {mean_iou}"
-        )
+        train_loss = train_epoch(model, train_loader, optimizer, device, logger)
+        logger.info(f"training data: epoch loss: {train_loss}")
 
-        valid_loss, mean_iou = evaluate_epoch(
-            model, valid_loader, [loss_fn, dice_loss_fn], device
-        )
+        valid_loss, mean_iou = evaluate_epoch(model, valid_loader, device)
         logger.info(
             f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}"
         )
+        best_checkpoint = False
         if valid_loss < best_score["loss"]["value"]:
             best_score["loss"]["epoch"] = epoch
             best_score["loss"]["value"] = valid_loss
+            best_checkpoint = True
         if mean_iou > best_score["miou"]["value"]:
             best_score["miou"]["epoch"] = epoch
             best_score["miou"]["value"] = mean_iou
-        logger.info(f"best score: {best_score}")
+            best_checkpoint = True
+        logger.info(
+            f"best loss | epoch={best_score['loss']['epoch']} | value={best_score['loss']['value']}"
+        )
+        logger.info(
+            f"best miou | epoch={best_score['miou']['epoch']} | value={best_score['miou']['value']}"
+        )
 
-        if (epoch + 1) % ckpt_interval == 0:
+        if (epoch + 1) % ckpt_interval == 0 or best_checkpoint:
             checkpoint = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -193,7 +168,10 @@ def main(*args):
                 "valid_loss": valid_loss,
                 # Include any other relevant information
             }
-            torch.save(checkpoint, os.path.join(ckpt_save_dir, f"ckpt_{epoch}.pt"))
+            best_str = "best_" if best_checkpoint else ""
+            torch.save(
+                checkpoint, os.path.join(ckpt_save_dir, f"{best_str}ckpt_{epoch}.pt")
+            )
 
 
 if __name__ == "__main__":
@@ -203,15 +181,14 @@ if __name__ == "__main__":
     )
     argparser.add_argument("-lr", type=float, default=1e-3, help="learning rate")
     argparser.add_argument("-e", type=int, default=5, help="number of epochs")
-    argparser.add_argument("-c", type=int, default=31, help="number of classes")
-    argparser.add_argument("-b", type=int, default=4, help="batch size")
-    argparser.add_argument("-ci", type=int, default=1, help="ckpt interval")
+    argparser.add_argument("-c", type=int, default=30, help="number of classes")
+    argparser.add_argument("-b", type=int, default=32, help="batch size")
+    argparser.add_argument("-ci", type=int, default=5, help="ckpt interval")
     argparser.add_argument(
         "-sanity_check",
         action="store_true",
         help="sanity check mode. use validation data for training",
     )
-    argparser.add_argument("-create_dataset", action="store_true")
     argparser.add_argument("-ckpt", type=str, default=None, help="ckpt path")
     args = argparser.parse_args()
     main(args)

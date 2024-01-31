@@ -1,26 +1,25 @@
-import os 
+import os
 from tqdm import tqdm
 import torch
+import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from unet_torch_mps.utils.utils import load_checkpoint, set_logger
-from unet_torch_mps.metrics.iou import calculate_mean_iou
+from unet_torch_mps.metrics.iou import calculate_miou
 
 
 class Trainer:
-    def __init__(
-        self, model, optimizer, loss_fns, train_data_loader, valid_data_loader, config
-    ):
+    def __init__(self, model, optimizer, train_data_loader, valid_data_loader, config):
         self.num_epochs = config["num_epochs"]
-        self.lr = config["lr"]
         self.model = model
         self.optimizer = optimizer
         self.train_data_loader = train_data_loader
         self.valid_data_loader = valid_data_loader
-        self.device = config["device"]
-        self.ckpt_path = config["ckpt"]
-        self.ckpt_saving_dir = config["ckpt_saving_dir"]
-        self.ckpt_interval = config["ckpt_interval"]
-        self.loss_fns = loss_fns
+        self.device = config["device"] if "device" in config else "cpu"
+        self.ckpt_path = config["ckpt"] if "ckpt" in config else None
+        self.ckpt_saving_dir = (
+            config["ckpt_saving_dir"] if "ckpt_saving_dir" in config else None
+        )
+        self.ckpt_interval = config["ckpt_interval"] if "ckpt_interval" in config else 1
         self.logger = set_logger()
         if self.ckpt_path is not None:
             self.start_epoch = load_checkpoint(
@@ -29,8 +28,9 @@ class Trainer:
         else:
             self.start_epoch = 0
 
-        assert self.device in ["cpu", "cuda", "mps"]
-        assert self.model.device == self.device
+        assert self.device in ["cpu", "cuda", "mps"] or self.device.startswith("cuda:")
+        if not os.path.exists(self.ckpt_saving_dir):
+            os.makedirs(self.ckpt_saving_dir)
 
         self.best_score = {
             "loss": {"epoch": 0, "value": float("inf")},
@@ -44,86 +44,89 @@ class Trainer:
     def train(self):
         for epoch in range(self.start_epoch, self.start_epoch + self.num_epochs):
             self.logger.info(f"Trainer:: Training epoch: {epoch}")
-            train_loss, train_miou = self.train_epoch()
+            train_loss = self.train_epoch()
             self.logger.info(
-                f"Trainer:: Training epoch: {epoch} with train_loss: {train_loss} and train_miou: {train_miou}"
+                f"Trainer:: Training epoch: {epoch} with train_loss: {train_loss}"
             )
             valid_loss, valid_miou = self.evaluate_epoch()
             self.logger.info(
                 f"Trainer:: Training epoch: {epoch} with valid_loss: {valid_loss} and valid_miou: {valid_miou}"
             )
-            self.save_best(valid_loss, valid_miou, epoch)
-            self.logger.info(f"Trainer:: Best score: {self.best_score}")
-            
-            if (epoch + 1) % self.ckpt_interval == 0:
-                self.save_ckpt(epoch, train_loss, valid_loss, valid_miou)
+            is_best = self.save_best(valid_loss, valid_miou, epoch)
+            self.logger.info(
+                f"Trainer:: best loss | epoch={self.best_score['loss']['epoch']} | value={self.best_score['loss']['value']}"
+            )
+            self.logger.info(
+                f"Trainer:: best miou | epoch={self.best_score['miou']['epoch']} | value={self.best_score['miou']['value']}"
+            )
+
+            if (epoch + 1) % self.ckpt_interval or is_best == 0:
+                self.save_ckpt(epoch, train_loss, valid_loss, valid_miou, is_best)
                 self.logger.info(f"Trainer:: Saved ckpt at epoch: {epoch}")
 
-    def train_iter(self, img, mask_gt):
-        mask_pred_logit = self.model(img)
-        loss = None
-        for loss_fn in self.loss_fns:
-            loss += loss_fn(mask_pred_logit, mask_gt)
-        self.optimizer.zero_grad()
+    def train_iter(self, img, target):
+        pred = self.model(img)
+        B, C, H, W = pred.shape
+        pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
+        target = target.view(B * H * W)
+        loss = F.cross_entropy(pred, target)
+        self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         clip_grad_norm_(self.model.parameters(), 1.0)
         self.optimizer.step()
-        train_loss = loss.item()
-        miou = calculate_mean_iou(mask_pred_logit, mask_gt)
-        return train_loss, miou
+        return loss.item()
 
     def train_epoch(self):
         self.model.train()
-        total_loss = 0
-        total_miou = 0
-        for batch_idx, (img, mask_gt) in enumerate(self.train_loader):
-            iter_loss, iter_miou = self.train_iter(
-                img.to(self.device), mask_gt.to(self.device)
-            )
+        epoch_loss = 0
+        for batch_idx, (img, target) in enumerate(self.train_data_loader):
+            loss = self.train_iter(img.to(self.device), target.to(self.device))
             self.logger.info(
-                f"training data({batch_idx}/{len(self.train_loader)}): iter loss: {iter_loss} and iter miou: {iter_miou}"
+                f"training data({batch_idx}/{len(self.train_data_loader)}): loss: {loss}"
             )
-            total_loss += iter_loss
-            total_miou += iter_miou
-        avg_loss = total_loss / (batch_idx + 1)
-        avg_miou = total_miou / (batch_idx + 1)
-        return avg_loss, avg_miou
+            epoch_loss += loss
+        epoch_loss = epoch_loss / (batch_idx + 1)
+        return epoch_loss
 
-    def evaluate_iter(self, img, mask_gt):
-        mask_pred_logit = self.model(img)
-        loss = None
-        for loss_fn in self.loss_fns:
-            loss += loss_fn(mask_pred_logit, mask_gt)
-        iter_loss = loss.item()
-        iter_miou = calculate_mean_iou(mask_pred_logit, mask_gt)
-        return iter_loss, iter_miou
+    def evaluate_iter(self, img, target):
+        pred = self.model(img)
+        B, C, H, W = pred.shape
+        miou = calculate_miou(pred, target)
+        pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
+        target = target.view(B * H * W)
+        loss = F.cross_entropy(pred, target)
+        return loss.item(), miou.item()
 
     def evaluate_epoch(self):
         self.model.eval()  # set model to evaluation mode
         with torch.no_grad():
-            total_loss = 0
-            total_miou = 0
-            for batch_idx, (img, mask_gt) in tqdm(
-                enumerate(self.valid_loader), total=len(self.valid_loader)
+            epoch_loss = 0
+            epoch_miou = 0
+            for batch_idx, (img, target) in tqdm(
+                enumerate(self.valid_data_loader), total=len(self.valid_data_loader)
             ):
-                iter_loss, iter_miou = self.evaluate_iter(
-                    img.to(self.device), mask_gt.to(self.device)
+                loss, miou = self.evaluate_iter(
+                    img.to(self.device), target.to(self.device)
                 )
-                total_loss += iter_loss
-                total_miou += iter_miou
-            avg_miou = total_miou / (batch_idx + 1)
-            avg_loss = total_loss / (batch_idx + 1)
-        return avg_loss, avg_miou
+                epoch_loss += loss
+                epoch_miou += miou
+            epoch_miou = epoch_miou / (batch_idx + 1)
+            epoch_loss = epoch_loss / (batch_idx + 1)
+        return epoch_loss, epoch_miou
 
     def save_best(self, loss, miou, epoch):
+        is_best = False
         if loss < self.best_score["loss"]["value"]:
             self.best_score["loss"]["epoch"] = epoch
             self.best_score["loss"]["value"] = loss
+            is_best = True
         if miou > self.best_score["miou"]["value"]:
             self.best_score["miou"]["epoch"] = epoch
             self.best_score["miou"]["value"] = miou
+            is_best = True
+        return is_best
 
-    def save_ckpt(self, epoch, train_loss, valid_loss, miou):
+    def save_ckpt(self, epoch, train_loss, valid_loss, miou, is_best):
         ckpt = {
             "epoch": epoch,
             "model_state_dict": self.model.state_dict(),
@@ -132,4 +135,5 @@ class Trainer:
             "valid_loss": valid_loss,
             "miou": miou,
         }
-        torch.save(ckpt, os.path.join(self.ckpt_saving_dir, f"ckpt_{epoch}.pt"))
+        best_str = "best_" if is_best else ""
+        torch.save(ckpt, os.path.join(self.ckpt_save_dir, f"{best_str}ckpt_{epoch}.pt"))

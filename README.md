@@ -35,7 +35,7 @@ options:
 ```
 
 ## TODO 
-- [ ] Refactor train.py in OOP way 
+- [x] Refactor train.py in OOP way --> python/train/trainer.py
 - [x] Update loss function to better one 
 - [x] Load checkpoint and resume training
 - [x] Update readme 

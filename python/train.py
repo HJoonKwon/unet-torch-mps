@@ -8,6 +8,12 @@ from tqdm import tqdm
 from unet_torch_mps.model.unet import Unet
 from unet_torch_mps.dataset.cityscapes import CityScapesDataset
 
+try:
+    import wandb
+    import matplotlib.pyplot as plt
+except ImportError:
+    wandb = None
+
 
 def generate_dataloader(data_dir: str, split: str, batch_size: int):
     assert split in ["train", "val"]
@@ -69,14 +75,26 @@ def evaluate_epoch(model, valid_loader, device):
     with torch.no_grad():
         epoch_loss = 0
         epoch_iou = 0
-        for batch_idx, (img, target) in tqdm(
-            enumerate(valid_loader), total=len(valid_loader)
-        ):
+        gt_pred_list = []
+        for batch_idx, (img, target) in tqdm(enumerate(valid_loader)):
             img, target = img.to(device), target.to(device)
             pred = model(img)
             pred_argmax = F.softmax(pred, dim=1).argmax(1)
             iou = (pred_argmax == target.squeeze()).float().mean()
             epoch_iou += iou.item()
+
+            if wandb is not None and batch_idx <= 2:
+                pred_argmax = pred_argmax[0].cpu().numpy()
+                target_argmax = target.squeeze()[0].cpu().numpy()
+                plt.subplot(1, 2, 1)
+                plt.imshow(target_argmax)
+                plt.subplot(1, 2, 2)
+                plt.imshow(pred_argmax)
+                gt_pred = wandb.Image(
+                    plt,
+                    caption=f"gt | pred",
+                )
+                gt_pred_list.append(gt_pred)
 
             B, C, H, W = pred.shape
             pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
@@ -85,6 +103,8 @@ def evaluate_epoch(model, valid_loader, device):
             epoch_loss += loss.item()
         epoch_loss = epoch_loss / (batch_idx + 1)
         epoch_iou = epoch_iou / (batch_idx + 1)
+        if wandb is not None:
+            wandb.log({"ground truths and predictions": gt_pred_list})
     return epoch_loss, epoch_iou
 
 
@@ -101,6 +121,9 @@ def set_logger():
 
 
 def main(*args):
+    if wandb is not None:
+        wandb.init(project="unet-pytorch")
+        wandb.config.update(args[0])
     args = args[0]
     num_classes = args.c
     epochs = args.e
@@ -110,10 +133,10 @@ def main(*args):
     if torch.backends.mps.is_available():
         device = "mps"
     elif torch.cuda.is_available():
-        device = "cuda"
+        device = "cuda:2"
     else:
         device = "cpu"
-    ckpt_save_dir = "../ckpt"
+    ckpt_save_dir = args.ckpt_save_dir
     os.makedirs(ckpt_save_dir, exist_ok=True)
     logger = set_logger()
 
@@ -143,6 +166,15 @@ def main(*args):
         logger.info(
             f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}"
         )
+        if wandb is not None:
+            wandb.log(
+                {
+                    "train_loss": train_loss,
+                    "valid_loss": valid_loss,
+                    "mean_iou": mean_iou,
+                    "epoch": epoch,
+                }
+            )
         best_checkpoint = False
         if valid_loss < best_score["loss"]["value"]:
             best_score["loss"]["epoch"] = epoch
@@ -190,5 +222,8 @@ if __name__ == "__main__":
         help="sanity check mode. use validation data for training",
     )
     argparser.add_argument("-ckpt", type=str, default=None, help="ckpt path")
+    argparser.add_argument(
+        "-ckpt_save_dir", type=str, default="../tmp", help="dir to save ckpt"
+    )
     args = argparser.parse_args()
     main(args)

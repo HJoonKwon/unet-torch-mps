@@ -44,6 +44,33 @@ id_map = {
 id_values = np.array(list(id_map.values()), dtype=np.uint8)
 id_keys = np.array(list(id_map.keys()), dtype=np.uint8)
 
+mean = (0.485, 0.456, 0.406)
+std = (0.229, 0.224, 0.225)
+max_pixel_value = 255.0
+
+
+def denormalize(
+    tensor,
+    mean=(0.485, 0.456, 0.406),
+    std=(0.229, 0.224, 0.225),
+    max_pixel_value=255.0,
+    dtype=np.uint8,
+):
+    assert len(tensor.shape) == 3, "Tensor shape should be (H, W, C)"
+    assert tensor.shape[2] == 3, "Tensor shape should be (H, W, C)"
+
+    mean = np.array(mean, dtype=np.float32) * max_pixel_value  # (3, )
+    std = np.array(std, dtype=np.float32) * max_pixel_value  #  (3, )
+
+    mean = mean.reshape(1, 1, -1)
+    std = std.reshape(1, 1, -1)
+
+    tensor = tensor * std + mean
+    tensor = np.clip(tensor.astype(dtype), 0, 255)
+
+    return tensor
+
+
 class CityScapesDataset(Dataset):
     def __init__(
         self,
@@ -62,7 +89,12 @@ class CityScapesDataset(Dataset):
             self.id_map_array[:, key] = np.array(val)
         self.normalize_and_to_tensor = A.Compose(
             [
-                A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+                A.Normalize(
+                    mean=mean,
+                    std=std,
+                    max_pixel_value=max_pixel_value,
+                    always_apply=True,
+                ),
                 ToTensorV2(),
             ]
         )
@@ -81,7 +113,7 @@ class CityScapesDataset(Dataset):
         """
         values = id_values.reshape(1, 1, -1, 3)
         mask = mask.reshape(mask.shape[0], mask.shape[1], 1, -1)
-        min_indexes = np.argmin(np.linalg.norm(values-mask, axis=3), axis=2)
+        min_indexes = np.argmin(np.linalg.norm(values - mask, axis=3), axis=2)
         mask = id_keys[min_indexes][:, :, np.newaxis]
         return mask
 

@@ -4,8 +4,6 @@ import cv2
 from glob import glob
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from typing import Optional
-from tqdm import tqdm
 import numpy as np
 
 id_map = {
@@ -41,8 +39,7 @@ id_map = {
     29: (119, 11, 32),  # bicycle
     30: (0, 0, 142),  # license plate
 }
-id_values = np.array(list(id_map.values()), dtype=np.uint8)
-id_keys = np.array(list(id_map.keys()), dtype=np.uint8)
+id_values = np.array(list(id_map.values()))
 
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
@@ -107,14 +104,14 @@ class CityScapesDataset(Dataset):
 
     def _convert_mask_with_rgb_to_mask_with_id(self, mask: np.ndarray):
         """
+        Vectorized the reference code, so that it is much faster.
         Reference:
             1. https://www.kaggle.com/code/tr1gg3rtrash/car-driving-segmentation-unet-from-scratch
             2. https://github.com/WhiteWolf47/cscapes_semantic_segmentation
         """
-        values = id_values.reshape(1, 1, -1, 3)
-        mask = mask.reshape(mask.shape[0], mask.shape[1], 1, -1)
-        min_indexes = np.argmin(np.linalg.norm(values - mask, axis=3), axis=2)
-        mask = id_keys[min_indexes][:, :, np.newaxis]
+        values = id_values.reshape(1, 1, -1, 3).astype(float) # int gives wrong results
+        mask = mask.reshape(mask.shape[0], mask.shape[1], 1, -1).astype(float)
+        mask = np.argmin(np.linalg.norm(values - mask, axis=3), axis=2)
         return mask
 
     def _construct_augmentation(self, img_width, img_height):

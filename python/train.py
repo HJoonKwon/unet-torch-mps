@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
 from unet_torch_mps.model.unet import Unet
-from unet_torch_mps.dataset.cityscapes import CityScapesDataset, denormalize
+from unet_torch_mps.dataset.cityscapes import CityScapesDataset, denormalize, id_values
 
 try:
     import wandb
@@ -80,12 +80,15 @@ def evaluate_epoch(model, valid_loader, device):
             img, target = img.to(device), target.to(device)
             pred = model(img)
             pred_argmax = F.softmax(pred, dim=1).argmax(1)
-            iou = (pred_argmax == target.squeeze()).float().mean()
+            iou = (pred_argmax == target).float().mean()
             epoch_iou += iou.item()
 
             if wandb is not None and batch_idx <= 2:
                 pred_argmax = pred_argmax[0].cpu().numpy()
-                target_argmax = target.squeeze()[0].cpu().numpy()
+                pred_argmax = id_values[pred_argmax]
+                target_argmax = target[0].cpu().numpy()
+                target_argmax = id_values[target_argmax]
+
                 plt.subplot(1, 3, 1)
                 plt.imshow(denormalize(img[0].permute(1, 2, 0).cpu().numpy()))
                 plt.axis("off")

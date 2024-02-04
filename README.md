@@ -34,6 +34,10 @@ options:
   -ckpt CKPT     ckpt path
 ```
 
+## Sample Result
+https://wandb.ai/joon/unet-pytorch
+
+
 ## TODO 
 - [x] Refactor train.py in OOP way --> python/train/trainer.py
 - [x] Update loss function to better one 

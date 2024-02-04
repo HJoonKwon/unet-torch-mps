@@ -37,6 +37,8 @@ options:
 ## Sample Result
 https://wandb.ai/joon/unet-pytorch
 
+![image](assets/wandb.png)
+
 
 ## TODO 
 - [x] Refactor train.py in OOP way --> python/train/trainer.py

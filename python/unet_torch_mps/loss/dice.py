@@ -3,6 +3,67 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class TanimotoLoss(nn.Module):
+    def __init__(self, smooth=1e-5, axis=(2, 3)):
+        super().__init__()
+        self.axis = axis
+        self.smooth = smooth
+
+    def forward(self, preds, label_one_hot):
+        # Calculate the class volume per batch
+        Vli = torch.mean(torch.sum(label_one_hot, dim=self.axis), dim=0)
+        wli = torch.reciprocal(Vli**2 + self.smooth)  # Avoid division by zero
+
+        # Handle infinite weights
+        new_weights = torch.where(torch.isinf(wli), torch.zeros_like(wli), wli)
+        wli = torch.where(
+            torch.isinf(wli), torch.ones_like(wli) * torch.max(new_weights), wli
+        )
+
+        # Compute Tanimoto coefficient
+        rl_x_pl = torch.sum(label_one_hot * preds, dim=self.axis)
+        l = torch.sum(label_one_hot**2, dim=self.axis)
+        p = torch.sum(preds**2, dim=self.axis)
+        rl_p_pl = l + p - rl_x_pl
+
+        tnmt = (torch.sum(wli * rl_x_pl, dim=1) + self.smooth) / (
+            torch.sum(wli * rl_p_pl, dim=1) + self.smooth
+        )
+
+        # Return the loss
+        return 1 - tnmt  # Dice loss is 1 - Dice coefficient
+
+
+class TanimotoWithDualLoss(nn.Module):
+    """
+    Tanimoto coefficient with dual form: Diakogiannis et al 2019
+    """
+
+    def __init__(self, num_classes, smooth=1e-5, axis=(2, 3), weight=None):
+        super().__init__()
+        self.num_classes = num_classes
+        self.tanimoto_loss = TanimotoLoss(smooth, axis)
+
+    def forward(self, preds_softmax, label):
+        # Convert label to one-hot encoding
+        label_one_hot = (
+            torch.nn.functional.one_hot(label, num_classes=self.num_classes)
+            .permute(0, 3, 1, 2)
+            .float()
+        )
+
+        # Measure of overlap using the softmax probabilities and one-hot labels
+        loss1 = self.tanimoto_loss(preds_softmax, label_one_hot)
+
+        # Measure of non-overlap
+        preds_dual = 1.0 - preds_softmax
+        labels_dual = 1.0 - label_one_hot
+        loss2 = self.tanimoto_loss(preds_dual, labels_dual)
+
+        # The final loss is an average of the two components
+        return 0.5 * (loss1 + loss2).mean()
+
+
 class DiceLoss(nn.Module):
     def __init__(self, smooth=1.0):
         super(DiceLoss, self).__init__()

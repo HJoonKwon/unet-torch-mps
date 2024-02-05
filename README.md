@@ -1,17 +1,17 @@
 # unet-torch-mps
 
-## Installation 
-### Install PyTorch that corresponds with your device. 
-```bash 
+## Installation
+### Install PyTorch that corresponds with your device.
+```bash
 $ conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 ```
-### Install dependencies 
+### Install dependencies
 if something's missing, please install them with pip.
 ```bash
 $ pip install -r requirements.txt
 ```
 
-## RUN 
+## RUN
 ```bash
 $ cd scripts && bash download.sh
 ```
@@ -40,13 +40,8 @@ https://wandb.ai/joon/unet-pytorch
 ![image](assets/wandb.png)
 
 
-## TODO 
-- [x] Refactor train.py in OOP way --> python/train/trainer.py
-- [x] Update loss function to better one 
-- [x] Load checkpoint and resume training
-- [x] Update readme 
-- [ ] make docker file 
-- [x] logger instead of print 
-- [ ] wandb instead of terminal 
-- [ ] torch compile
-- [ ] implement scheduler 
+## TODO
+- [ ] implement scheduler
+- [ ] implement attention unet
+- [ ] optimize gpu utilization
+- [ ] make docker file

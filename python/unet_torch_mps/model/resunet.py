@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-#https://arxiv.org/pdf/1904.00592.pdf
+
+# https://arxiv.org/pdf/1904.00592.pdf
 class ResUnetBranch(nn.Module):
     def __init__(self, in_ch: int, dilation: int):
         super().__init__()
@@ -12,7 +13,7 @@ class ResUnetBranch(nn.Module):
         self.batchnorm1 = nn.BatchNorm2d(in_ch)
         self.act1 = nn.ReLU()
         self.conv2 = nn.Conv2d(
-            in_ch, in_ch, 3, 1, padding="same", bias=False, dilation=dilation
+            in_ch, in_ch, 3, 1, padding="same", bias=True, dilation=dilation
         )
         self.batchnorm2 = nn.BatchNorm2d(in_ch)
         self.act2 = nn.ReLU()
@@ -26,18 +27,24 @@ class ResUnetBranch(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x
+        return self.layer(x)
 
 
 class ResUnetBlock(nn.Module):
     def __init__(self, in_ch, dilations):
         super().__init__()
-        self.branches = [ResUnetBranch(in_ch, dilation) for dilation in dilations]
+        self.branches = nn.ModuleList(
+            [ResUnetBranch(in_ch, dilation) for dilation in dilations]
+        )
 
     def forward(self, x):
+        accumulator = None
         for branch in self.branches:
-            x += branch(x)
-        return x
+            if accumulator is None:
+                accumulator = branch(x)
+            else:
+                accumulator += branch(x)
+        return x + accumulator if accumulator is not None else x
 
 
 class Conv2DN(nn.Module):
@@ -94,73 +101,33 @@ class PSPPooling(nn.Module):
     This is the PSPPooling layer adapted for PyTorch.
     """
 
-    def __init__(self, nfilters, depth=4):
+    def __init__(self, in_ch, out_ch, depth=4):
         super().__init__()
 
-        self.nfilters = nfilters
+        self.in_ch = in_ch
+        self.out_ch = out_ch
         self.depth = depth
 
         # Container for layers
         self.convs = nn.ModuleList()
         for _ in range(depth):
-            self.convs.append(Conv2DN(nfilters // depth, nfilters // depth))
+            self.convs.append(Conv2DN(in_ch, out_ch // depth))
 
-        self.conv_norm_final = Conv2DN(2 * nfilters, nfilters)
-
-    def half_split(self, x):
-        """
-        Splits the input tensor into four parts.
-        """
-        b, c, h, w = x.size()
-        h2, w2 = h // 2, w // 2
-        return [
-            x[:, :, :h2, :w2],
-            x[:, :, :h2, w2:],
-            x[:, :, h2:, :w2],
-            x[:, :, h2:, w2:],
-        ]
-
-    def quarter_stitch(self, blocks):
-        """
-        Reassembles four tensor blocks into a single tensor.
-        """
-        top = torch.cat(blocks[:2], dim=3)  # width
-        bottom = torch.cat(blocks[2:], dim=3)  # width
-        return torch.cat([top, bottom], dim=2)  # height
-
-    def half_pooling(self, x):
-        """
-        Applies pooling over split parts and stitches them back.
-        """
-        blocks = self.half_split(x)
-        pooled_blocks = [
-            F.adaptive_avg_pool2d(block, (1, 1)).expand_as(block) for block in blocks
-        ]
-        return self.quarter_stitch(pooled_blocks)
-
-    def split_pooling(self, x, depth):
-        """
-        Recursively applies split pooling.
-        """
-        if depth == 0:
-            return F.adaptive_max_pool2d(x, (1, 1)).expand_as(x)
-        elif depth == 1:
-            return self.half_pooling(x)
-        else:
-            blocks = self.half_split(x)
-            return self.quarter_stitch(
-                [self.split_pooling(block, depth - 1) for block in blocks]
-            )
+        self.conv_norm_final = Conv2DN(in_ch + out_ch, out_ch)
 
     def forward(self, x):
         """
         Forward pass of the PSPPooling layer.
         """
-        x_splits = torch.chunk(x, chunks=self.depth, dim=1)
         p = [x]
-        # Global Max Pooling equivalent
-        for d in range(self.depth):
-            p.append(self.convs[d](self.split_pooling(x_splits[d], d)))
+        B, C, H, W = x.shape
+        for i in range(self.depth):
+            pool_size = H // (2**i)
+            y = F.max_pool2d(x, (pool_size, pool_size), (pool_size, pool_size))
+            y = F.interpolate(y, scale_factor=pool_size)
+            y = self.convs[i](y)
+            p.append(y)
+
         out = torch.cat(p, dim=1)
         out = self.conv_norm_final(out)
         return out
@@ -169,7 +136,10 @@ class PSPPooling(nn.Module):
 class ResUnet(nn.Module):
     def __init__(self, in_ch, num_classes):
         super().__init__()
-        self.first = Conv2DN(in_ch, 32)
+        self.first = nn.Sequential(
+            Conv2DN(in_ch, 32),
+            nn.ReLU(),
+        )
         self.down1 = ResUnetBlock(32, [1, 3, 15, 31])
         self.down2 = nn.Sequential(
             Conv2D(32, 64, False),
@@ -181,7 +151,7 @@ class ResUnet(nn.Module):
         )
         self.down4 = nn.Sequential(
             Conv2D(128, 256, False),
-            ResUnetBlock(256, [1, 3, 15]),
+            ResUnetBlock(256, [1, 3, 5]),
         )
         self.down5 = nn.Sequential(
             Conv2D(256, 512, False),
@@ -190,12 +160,13 @@ class ResUnet(nn.Module):
         self.middle = nn.Sequential(
             Conv2D(512, 1024, False),
             ResUnetBlock(1024, [1]),
-            PSPPooling(1024, 4),
+            PSPPooling(1024, 1024, 4),
             UpSample(1024, 512),
+            nn.ReLU(),
         )
         self.combine1 = Combine(512 * 2, 512)
         self.up1 = nn.Sequential(
-            ResUnetBlock(512, [1]),
+            ResUnetBlock(512, [1, 3, 5]),
             UpSample(512, 256),
         )
         self.combine2 = Combine(256 * 2, 256)
@@ -216,12 +187,43 @@ class ResUnet(nn.Module):
         self.combine5 = Combine(32 * 2, 32)
         self.up5 = ResUnetBlock(32, [1])
         self.combine6 = Combine(32 * 2, 32)
-        self.psppooling = PSPPooling(32, 4)
+        self.psppooling = nn.Sequential(
+            PSPPooling(32 * 2, 32, 4),
+            nn.ReLU(),
+        )
         self.last = nn.Conv2d(32, num_classes, 1, 1)
 
+        self.logits = nn.Sequential(
+            Conv2D(num_classes * 2 + 32, 32, True),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            Conv2D(32, 32, True),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, num_classes, 1),
+        )
+
+        self.bound_logits = nn.Sequential(
+            Conv2D(32 + num_classes, 32, True),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, num_classes, 1),
+            nn.Sigmoid(),
+        )
+
+        self.distance_logits = nn.Sequential(
+            Conv2D(32 * 2, 32),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            Conv2D(32, 32, True),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, num_classes, 1),
+        )
+
     def forward(self, x):
-        x = self.first(x)
-        d1 = self.down1(x)
+        d0 = self.first(x)
+        d1 = self.down1(d0)
         d2 = self.down2(d1)
         d3 = self.down3(d2)
         d4 = self.down4(d3)
@@ -238,8 +240,14 @@ class ResUnet(nn.Module):
         u = self.up4(u)
         u = self.combine5(u, d1)
         u = self.up5(u)
-        u = self.combine6(u, x)
-        u = self.psppooling(u)
+        convl = torch.cat([d0, u], dim=1)
+        conv = self.psppooling(convl)
 
-        y = self.last(u)
-        return y
+        dist = self.distance_logits(convl)
+        dist = F.softmax(dist, dim=1)
+        bound = torch.cat([conv, dist], dim=1)
+        bound = self.bound_logits(bound)
+
+        logits = torch.cat([conv, bound, dist], dim=1)
+        logits = self.logits(logits)
+        return logits

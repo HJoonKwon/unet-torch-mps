@@ -30,8 +30,7 @@ class TanimotoLoss(nn.Module):
             torch.sum(wli * rl_p_pl, dim=1) + self.smooth
         )
 
-        # Return the loss
-        return 1 - tnmt  # Dice loss is 1 - Dice coefficient
+        return tnmt
 
 
 class TanimotoWithDualLoss(nn.Module):
@@ -60,8 +59,7 @@ class TanimotoWithDualLoss(nn.Module):
         labels_dual = 1.0 - label_one_hot
         loss2 = self.tanimoto_loss(preds_dual, labels_dual)
 
-        # The final loss is an average of the two components
-        return 0.5 * (loss1 + loss2).mean()
+        return 1 - 0.5 * (loss1 + loss2).mean()
 
 
 class DiceLoss(nn.Module):

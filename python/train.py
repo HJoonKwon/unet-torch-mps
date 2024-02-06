@@ -6,7 +6,9 @@ import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
 from unet_torch_mps.model.unet import Unet
+from unet_torch_mps.model.resunet import ResUnet
 from unet_torch_mps.dataset.cityscapes import CityScapesDataset, denormalize, id_values
+from unet_torch_mps.loss.dice import TanimotoWithDualLoss
 
 try:
     import wandb
@@ -49,16 +51,19 @@ def load_checkpoint(model, optimizer, ckpt_path, logger):
     return start_epoch
 
 
-def train_epoch(model, train_loader, optimizer, device, logger):
+def train_epoch(model, train_loader, optimizer, device, logger, lossfn = None):
     model.train()
     epoch_loss = 0
     for batch_idx, (img, target) in enumerate(train_loader):
         img, target = img.to(device), target.to(device)
         pred = model(img)
         B, C, H, W = pred.shape
-        pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
-        target = target.view(B * H * W)
-        loss = F.cross_entropy(pred, target)
+        if lossfn is not None:
+            loss = lossfn(pred, target)
+        else:
+            target = target.view(B * H * W)
+            pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
+            loss = F.cross_entropy(pred, target)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
@@ -70,7 +75,7 @@ def train_epoch(model, train_loader, optimizer, device, logger):
     return epoch_loss / (batch_idx + 1)
 
 
-def evaluate_epoch(model, valid_loader, device):
+def evaluate_epoch(model, valid_loader, device, lossfn=None):
     model.eval()  # set model to evaluation mode
     with torch.no_grad():
         epoch_loss = 0
@@ -79,7 +84,8 @@ def evaluate_epoch(model, valid_loader, device):
         for batch_idx, (img, target) in tqdm(enumerate(valid_loader)):
             img, target = img.to(device), target.to(device)
             pred = model(img)
-            pred_argmax = F.softmax(pred, dim=1).argmax(1)
+            pred_softmax = F.softmax(pred, dim=1)
+            pred_argmax =pred_softmax.argmax(1)
             iou = (pred_argmax == target).float().mean()
             epoch_iou += iou.item()
 
@@ -106,9 +112,12 @@ def evaluate_epoch(model, valid_loader, device):
                 gt_pred_list.append(gt_pred)
 
             B, C, H, W = pred.shape
-            pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
-            target = target.view(B * H * W)
-            loss = F.cross_entropy(pred, target)
+            if lossfn is not None:
+                loss = lossfn(pred_softmax, target)
+            else:
+                pred = pred.permute(0, 2, 3, 1).reshape(B * H * W, C)
+                target = target.view(B * H * W)
+                loss = F.cross_entropy(pred, target)
             epoch_loss += loss.item()
         epoch_loss = epoch_loss / (batch_idx + 1)
         epoch_iou = epoch_iou / (batch_idx + 1)
@@ -150,8 +159,10 @@ def main(*args):
     logger = set_logger()
 
     logger.info(f"device: {device}")
-    model = Unet(3, num_classes).to(device)
+    # model = Unet(3, num_classes).to(device)
+    model = ResUnet(3, num_classes).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    logger.info(f"number of parameters: {sum(p.numel() for p in model.parameters())}")
 
     valid_loader = generate_dataloader(args.d, "val", args.b)
     train_loader = (
@@ -166,53 +177,56 @@ def main(*args):
         "miou": {"epoch": 0, "value": 0},
     }
 
-    for epoch in range(start_epoch, start_epoch + epochs):
-        logger.info(f"epoch: {epoch}, lr:  {lr}")
-        train_loss = train_epoch(model, train_loader, optimizer, device, logger)
-        logger.info(f"training data: epoch loss: {train_loss}")
+    tonimato_loss = TanimotoWithDualLoss(num_classes)
 
-        valid_loss, mean_iou = evaluate_epoch(model, valid_loader, device)
-        logger.info(
-            f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}"
-        )
-        if wandb is not None:
-            wandb.log(
-                {
+    with torch.autograd.set_detect_anomaly(True):
+        for epoch in range(start_epoch, start_epoch + epochs):
+            logger.info(f"epoch: {epoch}, lr:  {lr}")
+            train_loss = train_epoch(model, train_loader, optimizer, device, logger, tonimato_loss)
+            logger.info(f"training data: epoch loss: {train_loss}")
+
+            valid_loss, mean_iou = evaluate_epoch(model, valid_loader, device, tonimato_loss)
+            logger.info(
+                f"validation data: avg loss: {valid_loss}, metric(mIoU): {mean_iou}"
+            )
+            if wandb is not None:
+                wandb.log(
+                    {
+                        "train_loss": train_loss,
+                        "valid_loss": valid_loss,
+                        "mean_iou": mean_iou,
+                        "epoch": epoch,
+                    }
+                )
+            best_checkpoint = False
+            if valid_loss < best_score["loss"]["value"]:
+                best_score["loss"]["epoch"] = epoch
+                best_score["loss"]["value"] = valid_loss
+                best_checkpoint = True
+            if mean_iou > best_score["miou"]["value"]:
+                best_score["miou"]["epoch"] = epoch
+                best_score["miou"]["value"] = mean_iou
+                best_checkpoint = True
+            logger.info(
+                f"best loss | epoch={best_score['loss']['epoch']} | value={best_score['loss']['value']}"
+            )
+            logger.info(
+                f"best miou | epoch={best_score['miou']['epoch']} | value={best_score['miou']['value']}"
+            )
+
+            if (epoch + 1) % ckpt_interval == 0 or best_checkpoint:
+                checkpoint = {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
                     "train_loss": train_loss,
                     "valid_loss": valid_loss,
-                    "mean_iou": mean_iou,
-                    "epoch": epoch,
+                    # Include any other relevant information
                 }
-            )
-        best_checkpoint = False
-        if valid_loss < best_score["loss"]["value"]:
-            best_score["loss"]["epoch"] = epoch
-            best_score["loss"]["value"] = valid_loss
-            best_checkpoint = True
-        if mean_iou > best_score["miou"]["value"]:
-            best_score["miou"]["epoch"] = epoch
-            best_score["miou"]["value"] = mean_iou
-            best_checkpoint = True
-        logger.info(
-            f"best loss | epoch={best_score['loss']['epoch']} | value={best_score['loss']['value']}"
-        )
-        logger.info(
-            f"best miou | epoch={best_score['miou']['epoch']} | value={best_score['miou']['value']}"
-        )
-
-        if (epoch + 1) % ckpt_interval == 0 or best_checkpoint:
-            checkpoint = {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "train_loss": train_loss,
-                "valid_loss": valid_loss,
-                # Include any other relevant information
-            }
-            best_str = "best_" if best_checkpoint else ""
-            torch.save(
-                checkpoint, os.path.join(ckpt_save_dir, f"{best_str}ckpt_{epoch}.pt")
-            )
+                best_str = "best_" if best_checkpoint else ""
+                torch.save(
+                    checkpoint, os.path.join(ckpt_save_dir, f"{best_str}ckpt_{epoch}.pt")
+                )
 
 
 if __name__ == "__main__":

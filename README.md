@@ -1,4 +1,7 @@
 # unet-torch-mps
+## Models
+- [x] [UNet](https://arxiv.org/abs/1505.04597)
+- [x] [ResUNet-a](https://arxiv.org/abs/1904.00592)
 
 ## Installation
 ### Install PyTorch that corresponds with your device.
